@@ -2,17 +2,18 @@ package com.billing.pricing.strategy.impl;
 
 import com.billing.config.BillingProperties.PricingDefinition;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.enums.BillingType;
 import com.billing.domain.pricing.PricingConfig;
 import com.billing.exception.ConfigurationException;
 import com.billing.pricing.strategy.support.AbstractPricingStrategy;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Tiered pricing: bills usage across ordered tier slabs at service level. */
+@Component
 public class TieredPricingStrategy extends AbstractPricingStrategy {
 
     @Override
@@ -21,9 +22,9 @@ public class TieredPricingStrategy extends AbstractPricingStrategy {
     }
 
     @Override
-    public PricingConfig buildConfig(ServiceKey serviceType, UnitKey unitType, PricingDefinition definition) {
+    public PricingConfig buildConfig(ServiceType serviceType, UnitType unitType, PricingDefinition definition) {
         if (definition.getTiers() == null || definition.getTiers().isEmpty()) {
-            throw new ConfigurationException("At least one tier is required for service: " + serviceType.value());
+            throw new ConfigurationException("At least one tier is required for service: " + serviceType);
         }
 
         List<PricingConfig.Tier> tiers = definition.getTiers().stream()
@@ -36,7 +37,7 @@ public class TieredPricingStrategy extends AbstractPricingStrategy {
     @Override
     public Money calculate(PricingConfig config, BigDecimal totalUsage) {
         if (config.tiers() == null || config.tiers().isEmpty()) {
-            throw new ConfigurationException("Tier configuration is missing for service: " + config.serviceType().value());
+            throw new ConfigurationException("Tier configuration is missing for service: " + config.serviceType());
         }
 
         Money totalCharge = Money.zero();

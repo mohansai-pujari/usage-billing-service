@@ -4,9 +4,6 @@ server:
 spring:
   application:
     name: usage-billing-service
-  jackson:
-    serialization:
-      write-dates-as-timestamps: false
 
 logging:
   level:
@@ -22,8 +19,18 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: never
+
 billing:
   currency:
+    enabled: true
     exchange-rates:
       EUR: 0.92
       GBP: 0.79
@@ -48,3 +55,8 @@ billing:
       monthly-fee: 50
       included-units: 1000000
       overage-unit-price: 0.001
+  test:
+    bulk-upload:
+      allowed-environments:
+        - local
+        - dev

@@ -1,6 +1,6 @@
-# Architecture & Design Patterns — Interview Guide
+# Architecture & Design Patterns
 
-Use this document to explain **how this billing service is built** and **why** — in system-design and OOP interviews.
+How this billing service is built and why — for code review and system-design discussions.
 
 Related: [REQUIREMENTS.md](REQUIREMENTS.md) · [README.md](README.md)
 
@@ -18,21 +18,23 @@ Record usage events per user/resource, apply service-specific pricing rules from
 flowchart TB
     subgraph web["Web layer"]
         UC[UsageController]
+        BUC[BulkUsageController]
         IC[InvoiceController]
         EH[ApiErrorHandler]
     end
 
-    subgraph service["Application layer"]
+    subgraph service["Service layer"]
         US[UsageService]
         BS[BillingService]
     end
 
-    subgraph pricing["Pricing layer (Spring-free)"]
+    subgraph pricing["Pricing layer"]
         UA[UsageAggregator]
         BC[BillingCalculator]
         IA[InvoiceAssembler]
         PS[PricingStrategy impls]
         PCR[PricingConfigurationRegistry]
+        ICC[InvoiceCurrencyConverter]
     end
 
     subgraph storage["Storage"]
@@ -42,20 +44,23 @@ flowchart TB
 
     subgraph config["Config"]
         BP[BillingProperties / YAML]
-        BBC[BillingBeanConfig]
+        BEC[BulkUploadEnvironmentCondition]
     end
 
     UC --> US --> BS
+    BUC --> BS
     IC --> BS
     BS --> UR
     BS --> IA
+    BS --> ICC
     IA --> UA
     IA --> BC
     IA --> PCR
     BC --> PS
     PCR --> BP
     UR --> US2
-    BBC --> pricing
+    BP --> PCR
+    BEC -.->|registers bean| BUC
 ```
 
 ### Layer responsibilities
@@ -63,13 +68,13 @@ flowchart TB
 | Layer | Package | Owns | Must NOT own |
 |-------|---------|------|--------------|
 | Web | `web/` | HTTP, JSON DTOs, validation at boundary | Pricing math, storage details |
-| Service | `service/` | Use-case orchestration | HTTP concerns, tier formulas |
+| Service | `service/` | Use-case orchestration (record usage, generate invoice) | HTTP concerns, tier formulas |
 | Pricing | `pricing/` | Aggregation, calculation, invoice assembly | Database SQL, REST mapping |
 | Domain | `domain/` | Core types + invariants | Framework annotations |
 | Storage | `storage/` | Persist / query usage events | Invoice logic |
-| Config | `config/` | Wire beans, bind YAML | Business rules |
+| Config | `config/` | Wire beans, bind YAML, conditional features | Business rules |
 
-**Interview line:** *“I separated ingestion, pricing, and invoice assembly so each layer can be tested and replaced independently — that was an explicit assignment requirement.”*
+**Design note:** The codebase uses **direct injection of concrete pricing/storage classes** (not separate port interfaces). The assignment’s “replaceable repository” requirement is met by `UsageRepository`; strategy extensibility is met by `PricingStrategy` + registry.
 
 ---
 
@@ -80,28 +85,43 @@ flowchart TB
 ```
 POST /usage
   → UsageRequest (DTO, validated)
+  → UsageRequest.toEvent() → UsageEvent
   → UsageService.recordUsage()
-  → BillingService.recordUsage(UsageEvent)
-      → PricingConfigurationRegistry.validateUnit()   // config lookup
-      → UsageRepository.save()
+  → BillingService.recordUsage()
+      → PricingConfigurationRegistry.validateUnit()
+      → UsageRepository.save()          // false if duplicate eventId
+      → BillingMetrics (saved / duplicate counters)
 ```
 
 ### 3.2 Generate invoice
 
 ```
 GET /invoices/{userId}?start=&end=
+  → InvoiceQuery
   → BillingService.generateInvoice()
-      → UsageRepository.findByUserAndPeriod()       // filter by [start, end)
+      → UsageRepository.findByQuery()   // UsageQuery.matches() filters period + service
       → InvoiceAssembler.assemble()
-          → UsageAggregator.aggregate()             // group by service/resource
+          → UsageAggregator.aggregate()           // order-independent sums
           → for each service:
-              → BillingCalculator.calculateServiceCharge()  // strategy.calculate()
+              → BillingCalculator.calculateServiceCharge()
               → BillingCalculator.calculateResourceLineAmounts()
           → build line items, subtotals, total
-      → InvoiceCurrencyConverter.convert()          // optional display currency
+      → InvoiceCurrencyConverter.convert()        // optional display currency
+      → BillingMetrics.recordInvoiceGenerated()
 ```
 
 **Key insight:** Period filtering happens **before** aggregation. Events outside `[start, end)` never enter pricing.
+
+### 3.3 Bulk ingest (local/dev only)
+
+```
+POST /usage/bulk   [only if BulkUploadEnvironmentCondition matches]
+  → BulkUsageController
+      → load fixture or request payload
+      → for each UsageRequest: BillingService.recordUsage(request.toEvent())
+```
+
+Beans for bulk upload are **not registered** in disallowed environments (e.g. `prod`). Swagger hides the operation via the same condition.
 
 ---
 
@@ -119,10 +139,7 @@ GET /invoices/{userId}?start=&end=
 | `calculate()` | Service-level charge from total quantity |
 | `allocateResourceLineAmounts()` | Split service charge across resources |
 
-**Why:** Adding “Graduated with Cap” = new class + YAML schema + `@Bean`. No `switch` in `BillingCalculator`.
-
-**Interview probe answer:**
-> “The calculator only asks the registry for the strategy by `BillingType`. It never knows tier math or subscription formulas. That’s Open/Closed in practice.”
+**Why:** Adding a new model = new `@Component` strategy + YAML schema. No `switch` in `BillingCalculator`.
 
 ---
 
@@ -138,9 +155,11 @@ GET /invoices/{userId}?start=&end=
 
 **Where:** `UsageRepository` interface, `UsageStore` in-memory impl.
 
-**Why:** Assignment says persistence is out of scope but must be replaceable. Services depend on the interface, not `ConcurrentHashMap`.
+**Why:** Assignment requires replaceable persistence. Services depend on the interface, not `ConcurrentHashMap`.
 
-**Production extension:** `PostgresUsageRepository`, partition by `(user_id, billing_month)`.
+**Storage key:** `userId::resourceId::SERVICE_TYPE` — same user/resource can have different service types tracked separately.
+
+**Production extension:** `PostgresUsageRepository`, index `(user_id, timestamp)`.
 
 ---
 
@@ -151,43 +170,35 @@ GET /invoices/{userId}?start=&end=
 | `Money` | float rounding, negative amounts in config |
 | `UsageQuantity` | zero/negative/null quantities |
 | `BillingPeriod` | invalid ranges; encodes `[start, end)` |
-| `ServiceKey` / `UnitKey` | blank identifiers; normalizes service names |
-
-**Interview line:** *“I never pass raw `BigDecimal` for money at domain boundaries — `Money` centralizes scale and rounding.”*
+| `ServiceType` / `UnitType` | typed identifiers; unit validated per service at startup + ingest |
 
 ---
 
 ### 4.5 Externalized Configuration
 
-**Where:** `application.yml` → `BillingProperties` → `PricingConfigurationRegistry` → runtime `PricingConfig`.
+**Where:** `application.yml` → `BillingProperties` → `PricingDefinitionRules` (startup validation) → `PricingConfigurationRegistry` → runtime `PricingConfig`.
 
-**New service (no code change):**
-```yaml
-billing:
-  pricing:
-    archive:
-      billing-type: FLAT
-      unit: GB_HOUR
-      unit-price: 0.03
-```
+**New service:** add `ServiceType` + matching `UnitType` enum values + YAML block.
 
-**New billing model (code + config):** new `PricingStrategy` `@Bean` + `BillingType` enum value.
+**New billing model:** new `PricingStrategy` `@Component` + `BillingType` enum value.
 
 ---
 
-### 4.6 DTO — API boundary
+### 4.6 Conditional registration — environment-gated features
 
-**Where:** `UsageRequest`, `UsageResponse`, `InvoiceResponse`, `ErrorResponse`.
+**Where:** `@Conditional(BulkUploadEnvironmentCondition.class)` on `BulkUsageController` and the OpenAPI customizer bean.
 
-**Why:** JSON shape ≠ domain model. Controllers don’t expose `UsageEvent` or `Invoice` records directly.
+**Config:** `billing.test.bulk-upload.allowed-environments` (default `local`, `dev`). No active profile is treated as `local`.
+
+**Why:** Production deployments never load test-only endpoints or Swagger entries — not just hidden at runtime, but **beans not created**.
 
 ---
 
-### 4.7 Dependency Injection — framework at the edges
+### 4.7 DTO — API boundary
 
-**Where:** Spring `@Service`, `@Repository`, `BillingBeanConfig` `@Bean` methods.
+**Where:** `UsageRequest`, `UsagePageResponse`, `InvoiceResponse`, `ErrorResponse`.
 
-**Important detail:** Pricing classes (`BillingCalculator`, `InvoiceAssembler`, strategies) have **no** Spring annotations. Pure Java → easy unit tests, aligns with “billing logic independent of framework.”
+**Why:** JSON shape ≠ domain model. Controllers don’t expose `UsageEvent` or `Invoice` records directly. `UsageRequest.toEvent()` maps at the boundary.
 
 ---
 
@@ -200,28 +211,24 @@ billing:
 | `UsageAggregator` | Group events → summaries |
 | `BillingCalculator` | Delegate to strategy |
 | `InvoiceAssembler` | Build invoice structure |
+| `BillingService` | Record usage + orchestrate invoice generation |
 | `FlatPricingStrategy` | Flat math only |
 
 ### Open/Closed
 
 - New pricing model → new strategy; existing strategies untouched.
-- New service → YAML only.
+- New service → enum entry + YAML pricing block.
 
 ### Liskov Substitution
 
 - Any `UsageRepository` impl works in `BillingService`.
 - All `PricingStrategy` impls honor the same contract.
 
-### Interface Segregation
-
-- `UsageRepository`: save, find by period, find all — nothing about invoices.
-- `UsageAggregationStrategy`: aggregate only.
-
-### Dependency Inversion
+### Dependency Inversion (pragmatic)
 
 - `BillingService` → `UsageRepository` (abstraction)
 - `BillingCalculator` → `PricingStrategyRegistry` (not concrete tier class)
-- `InvoiceAssembler` → `UsageAggregationStrategy` interface
+- Pricing components injected as concrete `@Component`s — acceptable for this scope; repository and strategy registries remain the main extension points.
 
 ---
 
@@ -229,7 +236,7 @@ billing:
 
 ```
 UsageEvent
-  userId, resourceId, serviceType, unit, quantity, timestamp
+  userId, resourceId, serviceType, unit, quantity, timestamp, eventId?
 
         ↓ UsageAggregator (order-independent)
 
@@ -240,16 +247,18 @@ ServiceUsageSummary   (total qty + list of resources)
         ↓ BillingCalculator + PricingStrategy
 
 Invoice
-  lineItems[]      — one per resource
+  lineItems[]        — one per resource
   serviceSubtotals[] — one per service
   total
 ```
 
 **Out-of-order events:** Aggregator **sums** quantities by key; insertion order irrelevant.
 
+**Query filtering:** `UsageQuery.matches()` applies service filter + `BillingPeriod.contains(timestamp)`.
+
 ---
 
-## 7. Correctness hotspots (know these cold)
+## 7. Correctness hotspots
 
 | Topic | Rule in this codebase |
 |-------|----------------------|
@@ -257,61 +266,62 @@ Invoice
 | Tiered 150 hrs | 100×0.10 + 50×0.08 = 14.00 (service-level) |
 | Subscription 1.4M | 50 + 400,000×0.001 = 450.00 |
 | Flat 50 GB-hrs | 50×0.02 = 1.00 |
+| Deliverable total | user-1 all three services → **USD 466.00** |
 | Money | `BigDecimal`, scale 2, HALF_UP |
-| Unit validation | Event unit must match config for that service |
+| Unit validation | Event unit must match service’s expected unit |
 
 ---
 
-## 8. How to extend (common interview follow-ups)
+## 8. How to extend
 
-### “Add Graduated with Cap pricing”
+### Add Graduated-with-Cap pricing
 
 1. Add `BillingType.GRADUATED_CAP`
-2. Implement `GraduatedCapPricingStrategy`
-3. Register `@Bean` in `BillingBeanConfig` (auto-wired into registry)
-4. Extend YAML schema (cap amount, tier blocks)
-5. **Zero changes** to `FlatPricingStrategy`, `TieredPricingStrategy`, etc.
+2. Implement `GraduatedCapPricingStrategy` as `@Component`
+3. Extend YAML schema + `PricingDefinitionRules` validation
+4. No changes to existing strategies
 
-### “Add a new billable service (e.g. CDN)”
+### Add a new billable service (e.g. archive)
 
-1. Add YAML block under `billing.pricing.cdn`
-2. Clients send `serviceType: "cdn"` — no enum change
+1. Add `ARCHIVE` to `ServiceType` enum
+2. Add matching `UnitType` if needed
+3. Add YAML block under `billing.pricing.archive`
 
-### “Move to PostgreSQL”
+### Move to PostgreSQL
 
 1. Implement `UsageRepository` with JDBC/JPA
 2. Index `(user_id, timestamp)` for period queries
 3. Services unchanged
 
-### “Handle 10M events/sec” (production)
+### Scale ingestion (production discussion)
 
-Current design is in-memory / single-node. Discuss:
-- **Ingestion:** Kafka + idempotent consumers
-- **Storage:** time-partitioned tables or OLAP rollup
+- **Ingestion:** Kafka + idempotent consumers (`eventId` dedup)
+- **Storage:** time-partitioned tables or daily rollups
 - **Invoice:** pre-aggregate per `(user, service, day)`; invoice = sum of rollups
-- **Exactly-once:** event IDs + dedup table
 
 ---
 
-## 9. Trade-offs to acknowledge honestly
+## 9. Trade-offs
 
 | Decision | Benefit | Cost |
 |----------|---------|------|
 | In-memory store | Simple, fast for assignment | Not production-durable |
 | Tiered at service level | Matches spec examples | Per-resource tier breakdown is approximate (proportional lines) |
-| `BillingType` enum | Type-safe strategy lookup | New model needs enum entry |
-| Spring Boot | Fast delivery, DI, REST | Heavier than pure CLI |
-| Multi-currency (extra) | Real-world invoices | Beyond single-currency spec |
+| `ServiceType` enum | Type-safe + Swagger | New service needs enum entry |
+| Spring Boot + `@Autowired` | Fast delivery, DI, REST | Heavier than pure CLI |
+| Multi-currency (extension) | Real-world invoices | Beyond single-currency spec; disable via `billing.currency.enabled=false` |
+| Slimmer codebase (no port interfaces) | Less boilerplate, easier to navigate | Less “textbook hexagonal” — repository + strategy remain the swap points |
+| Conditional bulk controller | Prod-safe test tooling | Bulk logic lives in one controller class |
 
 ---
 
-## 10. 60-second “walk me through your design” script
+## 10. 60-second walkthrough script
 
-> “Usage enters through a REST API into application services that persist events behind a repository interface. When we generate an invoice, we load events for the user inside the billing window, aggregate them in an order-independent way by service and resource, then for each service we look up pricing config from YAML and delegate calculation to the right strategy — flat, tiered, or subscription. The assembler builds line items and subtotals. Pricing logic is plain Java with no Spring dependencies; the framework only wires components at the edge. New services are config-only; new billing models are a new strategy class plus config schema.”
+> “Usage enters through REST into `UsageService`, which maps DTOs to domain events and delegates to `BillingService`. Events persist behind `UsageRepository`. For invoices, we query events inside the billing window, aggregate them order-independently by service and resource, look up YAML-driven pricing config, and delegate math to the right strategy — flat, tiered, or subscription. `InvoiceAssembler` builds line items and subtotals. New billing models are a new strategy bean plus config; new services need an enum entry plus YAML. Test-only bulk ingest is a conditionally registered controller that never loads in prod.”
 
 ---
 
-## 11. Files to reference in a live interview
+## 11. Key files
 
 | Topic | File |
 |-------|------|
@@ -319,6 +329,8 @@ Current design is in-memory / single-node. Discuss:
 | Tier calculation | `pricing/strategy/impl/TieredPricingStrategy.java` |
 | Aggregation | `pricing/UsageAggregator.java` |
 | Invoice build | `pricing/InvoiceAssembler.java` |
+| Invoice orchestration | `service/BillingService.java` |
 | Config loading | `pricing/registry/PricingConfigurationRegistry.java` |
-| Wiring | `config/BillingBeanConfig.java` |
+| Strategy registration | `pricing/strategy/registry/PricingStrategyRegistry.java` |
+| Environment gating | `config/BulkUploadEnvironmentCondition.java` |
 | Spec examples test | `test/.../AssignmentScenarioTest.java` |

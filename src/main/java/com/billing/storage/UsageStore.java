@@ -1,8 +1,11 @@
 package com.billing.storage;
 
-import com.billing.domain.common.BillingPeriod;
+import com.billing.application.query.UsageQuery;
+import com.billing.domain.common.CompositeKeys;
+import com.billing.domain.enums.ServiceType;
 import com.billing.domain.usage.UsageEvent;
 import com.billing.exception.InvalidRequestException;
+import com.billing.support.LogLabels;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
@@ -10,60 +13,61 @@ import org.springframework.stereotype.Repository;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * In-memory implementation of {@link UsageRepository}.
- * <p>
- * Responsibility: Stores and retrieves usage events keyed by user and resource, with a secondary
- * index by user for efficient period queries.
- * <p>
- * Design patterns: Repository — concrete in-memory implementation; thread-safe collections for
- * concurrent access.
- */
 @Repository
 public class UsageStore implements UsageRepository {
 
     private static final Logger log = LoggerFactory.getLogger(UsageStore.class);
 
-    /** Primary store: composite key (user::resource) → list of events. */
     private final Map<String, CopyOnWriteArrayList<UsageEvent>> eventsByKey = new ConcurrentHashMap<>();
-
-    /** Secondary index: userId → list of composite keys for that user. */
     private final Map<String, List<String>> keysByUser = new ConcurrentHashMap<>();
+    private final Set<String> seenEventIds = ConcurrentHashMap.newKeySet();
 
     @Override
-    public void save(UsageEvent event) {
+    public boolean save(UsageEvent event) {
         if (event == null) {
             throw new InvalidRequestException("Usage event cannot be null.");
         }
 
-        String key = storageKey(event.userId(), event.resourceId());
-        log.debug(
-                "Saving usage event for user={}, resource={}, service={}, quantity={}",
-                event.userId(),
-                event.resourceId(),
-                event.serviceType(),
-                event.quantity());
+        if (event.hasEventId()) {
+            if (!seenEventIds.add(event.eventId())) {
+                log.debug("Skipping duplicate usage eventId={} user={} resource={} service={}",
+                        event.eventId(), event.userId(), event.resourceId(), event.serviceType());
+                return false;
+            }
+        }
+
+        String key = storageKey(event.userId(), event.resourceId(), event.serviceType());
+        log.debug("Saving usage for user={}, resource={}, service={}",
+                event.userId(), event.resourceId(), event.serviceType());
 
         eventsByKey.computeIfAbsent(key, ignored -> new CopyOnWriteArrayList<>()).add(event);
         keysByUser.computeIfAbsent(event.userId(), ignored -> new CopyOnWriteArrayList<>());
         if (!keysByUser.get(event.userId()).contains(key)) {
             keysByUser.get(event.userId()).add(key);
         }
+        return true;
     }
 
     @Override
-    public List<UsageEvent> findByUserAndPeriod(String userId, BillingPeriod period) {
-        requireUserId(userId);
-        requirePeriod(period);
+    public List<UsageEvent> findByQuery(UsageQuery query) {
+        if (query.period() == null) {
+            throw new InvalidRequestException("Billing period cannot be null.");
+        }
 
-        List<UsageEvent> events = findByUser(userId).stream()
-                .filter(event -> period.contains(event.timestamp()))
+        List<UsageEvent> candidates = query.userId() == null
+                ? findAll()
+                : findByUser(query.userId());
+
+        List<UsageEvent> events = candidates.stream()
+                .filter(query::matches)
                 .toList();
 
-        log.debug("Found {} usage events for user={} in period [{}, {})", events.size(), userId, period.start(), period.end());
+        log.debug("Found {} events for userId={}, serviceType={}",
+                events.size(), LogLabels.userId(query.userId()), LogLabels.serviceType(query.serviceType()));
         return events;
     }
 
@@ -71,15 +75,15 @@ public class UsageStore implements UsageRepository {
     public List<UsageEvent> findAll() {
         List<UsageEvent> all = new ArrayList<>();
         eventsByKey.values().forEach(all::addAll);
-        log.debug("Loaded {} total usage events from store", all.size());
+        log.debug("Loaded {} total usage events", all.size());
         return List.copyOf(all);
     }
 
     @Override
     public void clear() {
-        log.debug("Clearing all usage events from store");
         eventsByKey.clear();
         keysByUser.clear();
+        seenEventIds.clear();
     }
 
     private List<UsageEvent> findByUser(String userId) {
@@ -98,19 +102,7 @@ public class UsageStore implements UsageRepository {
         return List.copyOf(events);
     }
 
-    private static void requireUserId(String userId) {
-        if (userId == null || userId.isBlank()) {
-            throw new InvalidRequestException("User id is required.");
-        }
-    }
-
-    private static void requirePeriod(BillingPeriod period) {
-        if (period == null) {
-            throw new InvalidRequestException("Billing period cannot be null.");
-        }
-    }
-
-    private static String storageKey(String userId, String resourceId) {
-        return userId + "::" + resourceId;
+    static String storageKey(String userId, String resourceId, ServiceType serviceType) {
+        return CompositeKeys.join("::", userId, resourceId, serviceType.name());
     }
 }

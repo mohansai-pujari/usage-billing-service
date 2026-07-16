@@ -1,19 +1,18 @@
 package com.billing.domain.pricing;
 
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
 import com.billing.domain.enums.BillingType;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.exception.ConfigurationException;
 
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Runtime pricing configuration for one configured service. */
 public record PricingConfig(
-        ServiceKey serviceType,
+        ServiceType serviceType,
         BillingType billingType,
-        UnitKey unitType,
+        UnitType unitType,
         BigDecimal unitPrice,
         List<Tier> tiers,
         BigDecimal monthlyFee,

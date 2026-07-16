@@ -6,13 +6,19 @@ import com.billing.domain.usage.ServiceUsageSummary;
 import com.billing.exception.InvalidRequestException;
 import com.billing.pricing.strategy.PricingStrategy;
 import com.billing.pricing.strategy.registry.PricingStrategyRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Applies pricing strategies to aggregated usage summaries. */
+@Component
 public class BillingCalculator {
 
-    private final PricingStrategyRegistry strategyRegistry;
+    @Autowired
+    private PricingStrategyRegistry strategyRegistry;
+
+    public BillingCalculator() {
+    }
 
     public BillingCalculator(PricingStrategyRegistry strategyRegistry) {
         this.strategyRegistry = strategyRegistry;

@@ -1,23 +1,23 @@
 package com.billing.service;
 
+import com.billing.application.query.InvoiceQuery;
 import com.billing.domain.common.BillingPeriod;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
-import com.billing.domain.common.UsageQuantity;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.enums.CurrencyType;
+import com.billing.domain.enums.ServiceType;
 import com.billing.domain.invoice.Invoice;
 import com.billing.domain.usage.UsageEvent;
-import com.billing.exception.InvalidRequestException;
+import com.billing.exception.ServiceTypeUnitMismatchException;
 import com.billing.storage.UsageRepository;
 import com.billing.support.TestEvents;
+import com.billing.support.TestTimestamps;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class BillingServiceTest {
 
     private static final BillingPeriod PERIOD = new BillingPeriod(
-            Instant.parse("2026-01-01T00:00:00Z").toEpochMilli(),
-            Instant.parse("2026-02-01T00:00:00Z").toEpochMilli());
+            TestTimestamps.PERIOD_START,
+            TestTimestamps.PERIOD_END);
 
     @Autowired
     private BillingService billingService;
@@ -43,12 +43,12 @@ class BillingServiceTest {
 
     @Test
     void generatesInvoiceForMultipleServicesAndPricingModels() {
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", "2026-01-10T10:00:00Z"));
-        billingService.recordUsage(TestEvents.compute("user-1", "cpu-1", "150", "2026-01-15T10:00:00Z"));
-        billingService.recordUsage(TestEvents.api("user-1", "api-1", "1400000", "2026-01-20T10:00:00Z"));
-        billingService.recordUsage(TestEvents.storage("user-2", "disk-2", "50", "2026-01-25T10:00:00Z"));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", TestTimestamps.JAN_10_2026_10_00));
+        billingService.recordUsage(TestEvents.compute("user-1", "cpu-1", "150", TestTimestamps.JAN_15_2026_10_00));
+        billingService.recordUsage(TestEvents.api("user-1", "api-1", "1400000", TestTimestamps.JAN_20_2026_10_00));
+        billingService.recordUsage(TestEvents.storage("user-2", "disk-2", "50", TestTimestamps.JAN_25_2026_10_00));
 
-        Invoice invoice = billingService.generateInvoice("user-1", PERIOD);
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of("user-1", PERIOD, CurrencyType.USD, null));
 
         assertNotNull(invoice);
         assertEquals("user-1", invoice.userId());
@@ -59,11 +59,11 @@ class BillingServiceTest {
 
     @Test
     void multiResourceFlatLineItemsSumToServiceSubtotal() {
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "60", "2026-01-10T10:00:00Z"));
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-2", "40", "2026-01-11T10:00:00Z"));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "60", TestTimestamps.JAN_10_2026_10_00));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-2", "40", TestTimestamps.JAN_11_2026_10_00));
 
-        Invoice invoice = billingService.generateInvoice("user-1", PERIOD);
-        Invoice.ServiceSubtotal storage = subtotalFor(invoice, "storage");
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of("user-1", PERIOD, CurrencyType.USD, null));
+        Invoice.ServiceSubtotal storage = subtotalFor(invoice, ServiceType.STORAGE);
         Money sumOfLines = storage.lineItems().stream()
                 .map(Invoice.LineItem::amount)
                 .reduce(Money.zero(), Money::add);
@@ -77,24 +77,24 @@ class BillingServiceTest {
 
     @Test
     void outOfOrderEventsProduceCorrectTotals() {
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", "2026-01-20T10:00:00Z"));
-        billingService.recordUsage(TestEvents.compute("user-1", "cpu-1", "150", "2026-01-05T10:00:00Z"));
-        billingService.recordUsage(TestEvents.api("user-1", "api-1", "1400000", "2026-01-15T10:00:00Z"));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", TestTimestamps.JAN_20_2026_10_00));
+        billingService.recordUsage(TestEvents.compute("user-1", "cpu-1", "150", TestTimestamps.JAN_05_2026_10_00));
+        billingService.recordUsage(TestEvents.api("user-1", "api-1", "1400000", TestTimestamps.JAN_15_2026_10_00));
 
-        Invoice invoice = billingService.generateInvoice("user-1", PERIOD);
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of("user-1", PERIOD, CurrencyType.USD, null));
 
         assertEquals("USD 466.00", invoice.total().toString());
-        assertEquals("USD 2.00", subtotalFor(invoice, "storage").amount().toString());
-        assertEquals("USD 14.00", subtotalFor(invoice, "compute").amount().toString());
-        assertEquals("USD 450.00", subtotalFor(invoice, "api").amount().toString());
+        assertEquals("USD 2.00", subtotalFor(invoice, ServiceType.STORAGE).amount().toString());
+        assertEquals("USD 14.00", subtotalFor(invoice, ServiceType.COMPUTE).amount().toString());
+        assertEquals("USD 450.00", subtotalFor(invoice, ServiceType.API).amount().toString());
     }
 
     @Test
     void billingPeriodIsStartInclusiveAndEndExclusive() {
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "10", "2026-01-01T00:00:00Z"));
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-2", "10", "2026-02-01T00:00:00Z"));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "10", TestTimestamps.PERIOD_START));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-2", "10", TestTimestamps.PERIOD_END));
 
-        Invoice invoice = billingService.generateInvoice("user-1", PERIOD);
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of("user-1", PERIOD, CurrencyType.USD, null));
 
         assertEquals(1, invoice.lineItems().size());
         assertEquals("disk-1", invoice.lineItems().get(0).resourceId());
@@ -103,26 +103,50 @@ class BillingServiceTest {
 
     @Test
     void rejectsMismatchedUnitTypeForService() {
-        UsageEvent invalid = new UsageEvent(
-                "user-1", "cpu-1", ServiceKey.of("compute"), UnitKey.of("GB_HOUR"),
-                UsageQuantity.of(new BigDecimal("10")), Instant.parse("2026-01-10T10:00:00Z"));
+        UsageEvent invalid = UsageEvent.of(
+                "user-1", "cpu-1", ServiceType.COMPUTE, UnitType.GB_HOUR,
+                new BigDecimal("10"), TestTimestamps.JAN_10_2026_10_00);
 
-        assertThrows(InvalidRequestException.class, () -> billingService.recordUsage(invalid));
+        assertThrows(ServiceTypeUnitMismatchException.class, () -> billingService.recordUsage(invalid));
     }
 
     @Test
     void generatesInvoiceInRequestedCurrency() {
-        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "50", "2026-01-10T10:00:00Z"));
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "50", TestTimestamps.JAN_10_2026_10_00));
 
-        Invoice invoice = billingService.generateInvoice("user-1", PERIOD, CurrencyType.EUR);
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of("user-1", PERIOD, CurrencyType.EUR, null));
 
         assertEquals("EUR 0.92", invoice.total().format(CurrencyType.EUR));
     }
 
-    private static Invoice.ServiceSubtotal subtotalFor(Invoice invoice, String serviceType) {
-        ServiceKey key = ServiceKey.of(serviceType);
+    @Test
+    void generatesInvoiceForAllUsersWhenUserIdIsOmitted() {
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", TestTimestamps.JAN_10_2026_10_00));
+        billingService.recordUsage(TestEvents.storage("user-2", "disk-2", "50", TestTimestamps.JAN_25_2026_10_00));
+
+        Invoice invoice = billingService.generateInvoice(InvoiceQuery.of(null, PERIOD, CurrencyType.USD, null));
+
+        assertEquals(null, invoice.userId());
+        assertEquals(2, invoice.lineItems().size());
+        assertEquals("USD 3.00", invoice.total().toString());
+    }
+
+    @Test
+    void generatesInvoiceForSingleServiceWhenServiceTypeIsProvided() {
+        billingService.recordUsage(TestEvents.storage("user-1", "disk-1", "100", TestTimestamps.JAN_10_2026_10_00));
+        billingService.recordUsage(TestEvents.compute("user-1", "cpu-1", "150", TestTimestamps.JAN_15_2026_10_00));
+
+        Invoice invoice = billingService.generateInvoice(
+                InvoiceQuery.of("user-1", PERIOD, CurrencyType.USD, ServiceType.STORAGE));
+
+        assertEquals(1, invoice.serviceSubtotals().size());
+        assertEquals(ServiceType.STORAGE, invoice.serviceSubtotals().get(0).serviceType());
+        assertEquals("USD 2.00", invoice.total().toString());
+    }
+
+    private static Invoice.ServiceSubtotal subtotalFor(Invoice invoice, ServiceType serviceType) {
         return invoice.serviceSubtotals().stream()
-                .filter(subtotal -> subtotal.serviceType().equals(key))
+                .filter(subtotal -> subtotal.serviceType() == serviceType)
                 .findFirst()
                 .orElseThrow();
     }

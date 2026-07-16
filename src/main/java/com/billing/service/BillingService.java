@@ -1,7 +1,7 @@
 package com.billing.service;
 
-import com.billing.domain.common.BillingPeriod;
-import com.billing.domain.enums.CurrencyType;
+import com.billing.application.query.InvoiceQuery;
+import com.billing.domain.enums.ServiceType;
 import com.billing.domain.invoice.Invoice;
 import com.billing.domain.usage.UsageEvent;
 import com.billing.exception.InvalidRequestException;
@@ -10,36 +10,52 @@ import com.billing.pricing.InvoiceAssembler;
 import com.billing.pricing.currency.InvoiceCurrencyConverter;
 import com.billing.pricing.registry.PricingConfigurationRegistry;
 import com.billing.storage.UsageRepository;
+import com.billing.support.BillingMetrics;
+import com.billing.support.LogLabels;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Objects;
 
-/** Orchestrates usage persistence and invoice generation. */
 @Service
 public class BillingService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingService.class);
 
-    private final UsageRepository usageRepository;
-    private final InvoiceAssembler invoiceAssembler;
-    private final PricingConfigurationRegistry pricingRegistry;
-    private final InvoiceCurrencyConverter invoiceCurrencyConverter;
+    @Autowired
+    private UsageRepository usageRepository;
+
+    @Autowired
+    private PricingConfigurationRegistry pricingRegistry;
+
+    @Autowired
+    private InvoiceAssembler invoiceAssembler;
+
+    @Autowired
+    private InvoiceCurrencyConverter invoiceCurrencyConverter;
+
+    @Autowired
+    private BillingMetrics billingMetrics;
+
+    public BillingService() {
+    }
 
     public BillingService(
             UsageRepository usageRepository,
-            InvoiceAssembler invoiceAssembler,
             PricingConfigurationRegistry pricingRegistry,
-            InvoiceCurrencyConverter invoiceCurrencyConverter) {
-        this.usageRepository = Objects.requireNonNull(usageRepository);
-        this.invoiceAssembler = Objects.requireNonNull(invoiceAssembler);
-        this.pricingRegistry = Objects.requireNonNull(pricingRegistry);
-        this.invoiceCurrencyConverter = Objects.requireNonNull(invoiceCurrencyConverter);
+            InvoiceAssembler invoiceAssembler,
+            InvoiceCurrencyConverter invoiceCurrencyConverter,
+            BillingMetrics billingMetrics) {
+        this.usageRepository = usageRepository;
+        this.pricingRegistry = pricingRegistry;
+        this.invoiceAssembler = invoiceAssembler;
+        this.invoiceCurrencyConverter = invoiceCurrencyConverter;
+        this.billingMetrics = billingMetrics;
     }
 
-    public void recordUsage(UsageEvent event) {
+    public boolean recordUsage(UsageEvent event) {
         if (event == null) {
             throw new InvalidRequestException("Usage event cannot be null.");
         }
@@ -47,39 +63,47 @@ public class BillingService {
         pricingRegistry.validateUnit(event.serviceType(), event.unit());
         log.debug("Recording usage for user={}, resource={}, service={}",
                 event.userId(), event.resourceId(), event.serviceType());
-        usageRepository.save(event);
+        if (usageRepository.save(event)) {
+            billingMetrics.recordUsageSaved();
+            return true;
+        }
+        billingMetrics.recordUsageDuplicate();
+        return false;
     }
 
-    public Invoice generateInvoice(String userId, BillingPeriod period) {
-        return generateInvoice(userId, period, CurrencyType.USD);
-    }
+    public Invoice generateInvoice(InvoiceQuery query) {
+        log.debug("Generating invoice for user={} period=[{}, {}) currency={} serviceType={}",
+                LogLabels.userId(query.userId()), query.period().start(), query.period().end(),
+                query.currency(), LogLabels.serviceType(query.serviceType()));
 
-    public Invoice generateInvoice(String userId, BillingPeriod period, CurrencyType currency) {
-        if (userId == null || userId.isBlank()) {
-            throw new InvalidRequestException("User id is required.");
-        }
-        if (period == null) {
-            throw new InvalidRequestException("Billing period cannot be null.");
-        }
-        if (currency == null) {
-            throw new InvalidRequestException("Currency type is required.");
-        }
-
-        String trimmedUserId = userId.trim();
-        log.debug("Generating invoice for user={} period=[{}, {}) currency={}",
-                trimmedUserId, period.start(), period.end(), currency);
-
-        List<UsageEvent> events = usageRepository.findByUserAndPeriod(trimmedUserId, period);
+        List<UsageEvent> events = usageRepository.findByQuery(query.toUsageQuery());
         if (events.isEmpty()) {
-            throw new ResourceNotFoundException(
-                    "No usage found for user " + trimmedUserId
-                            + " in period [" + period.start() + ", " + period.end() + ").");
+            throw new ResourceNotFoundException(noUsageMessage(query));
         }
 
         Invoice invoice = invoiceCurrencyConverter.convert(
-                invoiceAssembler.assemble(trimmedUserId, period, events),
-                currency);
-        log.debug("Generated invoice for user={} total={}", trimmedUserId, invoice.total().format(currency));
+                invoiceAssembler.assemble(query.userId(), query.period(), events),
+                query.currency());
+        log.debug("Generated invoice for user={} total={}",
+                LogLabels.userId(query.userId()), invoice.total().format(query.currency()));
+        billingMetrics.recordInvoiceGenerated();
         return invoice;
+    }
+
+    private static String noUsageMessage(InvoiceQuery query) {
+        String periodRange = "period [" + query.period().start() + ", " + query.period().end() + ")";
+        String userId = query.userId();
+        ServiceType serviceType = query.serviceType();
+
+        if (userId != null && serviceType != null) {
+            return "No usage found for user " + userId + " and service " + serviceType + " in " + periodRange + ".";
+        }
+        if (userId != null) {
+            return "No usage found for user " + userId + " in " + periodRange + ".";
+        }
+        if (serviceType != null) {
+            return "No usage found for service " + serviceType + " in " + periodRange + ".";
+        }
+        return "No usage found in " + periodRange + ".";
     }
 }

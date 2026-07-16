@@ -2,8 +2,8 @@ package com.billing.pricing.strategy;
 
 import com.billing.config.BillingProperties.PricingDefinition;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.enums.BillingType;
 import com.billing.domain.pricing.PricingConfig;
 import com.billing.domain.usage.ServiceUsageSummary;
@@ -16,7 +16,7 @@ public interface PricingStrategy {
 
     BillingType billingType();
 
-    PricingConfig buildConfig(ServiceKey serviceType, UnitKey unitType, PricingDefinition definition);
+    PricingConfig buildConfig(ServiceType serviceType, UnitType unitType, PricingDefinition definition);
 
     Money calculate(PricingConfig config, BigDecimal quantity);
 

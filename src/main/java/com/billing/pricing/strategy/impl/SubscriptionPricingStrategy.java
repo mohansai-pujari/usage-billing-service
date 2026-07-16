@@ -2,17 +2,18 @@ package com.billing.pricing.strategy.impl;
 
 import com.billing.config.BillingProperties.PricingDefinition;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.enums.BillingType;
 import com.billing.domain.pricing.PricingConfig;
 import com.billing.exception.ConfigurationException;
 import com.billing.pricing.strategy.support.AbstractPricingStrategy;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Subscription pricing: {@code monthlyFee + max(0, usage − included) × overageUnitPrice}. */
+@Component
 public class SubscriptionPricingStrategy extends AbstractPricingStrategy {
 
     @Override
@@ -21,21 +22,21 @@ public class SubscriptionPricingStrategy extends AbstractPricingStrategy {
     }
 
     @Override
-    public PricingConfig buildConfig(ServiceKey serviceType, UnitKey unitType, PricingDefinition definition) {
+    public PricingConfig buildConfig(ServiceType serviceType, UnitType unitType, PricingDefinition definition) {
         if (definition.getMonthlyFee() == null) {
-            throw new ConfigurationException("Monthly fee is required for subscription service: " + serviceType.value());
+            throw new ConfigurationException("Monthly fee is required for subscription service: " + serviceType);
         }
         if (definition.getOverageUnitPrice() == null) {
-            throw new ConfigurationException("Overage unit price is required for subscription service: " + serviceType.value());
+            throw new ConfigurationException("Overage unit price is required for subscription service: " + serviceType);
         }
         if (Money.of(definition.getMonthlyFee()).isNegative()) {
-            throw new ConfigurationException("Monthly fee cannot be negative for service: " + serviceType.value());
+            throw new ConfigurationException("Monthly fee cannot be negative for service: " + serviceType);
         }
         if (Money.of(definition.getOverageUnitPrice()).isNegative()) {
-            throw new ConfigurationException("Overage unit price cannot be negative for service: " + serviceType.value());
+            throw new ConfigurationException("Overage unit price cannot be negative for service: " + serviceType);
         }
         if (definition.getIncludedUnits() != null && definition.getIncludedUnits() < 0) {
-            throw new ConfigurationException("Included units cannot be negative for service: " + serviceType.value());
+            throw new ConfigurationException("Included units cannot be negative for service: " + serviceType);
         }
 
         return config(
@@ -52,10 +53,10 @@ public class SubscriptionPricingStrategy extends AbstractPricingStrategy {
     @Override
     public Money calculate(PricingConfig config, BigDecimal totalUsage) {
         if (config.monthlyFee() == null) {
-            throw new ConfigurationException("Monthly fee is missing for service: " + config.serviceType().value());
+            throw new ConfigurationException("Monthly fee is missing for service: " + config.serviceType());
         }
         if (config.overageUnitPrice() == null) {
-            throw new ConfigurationException("Overage unit price is missing for service: " + config.serviceType().value());
+            throw new ConfigurationException("Overage unit price is missing for service: " + config.serviceType());
         }
 
         BigDecimal included = BigDecimal.valueOf(config.includedUnits());
