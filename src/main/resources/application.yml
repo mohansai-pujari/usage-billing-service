@@ -1,0 +1,47 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: usage-billing-service
+
+logging:
+  level:
+    root: INFO
+    com.billing: DEBUG
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+
+  api-docs:
+    path: /v3/api-docs
+
+#billing:
+#  pricing:
+#    config-file: pricing.json
+#
+
+billing:
+  pricing:
+    storage:
+      billing-type: FLAT
+      unit: GB_HOUR
+      unit-price: 0.02
+    compute:
+      billing-type: TIERED
+      unit: COMPUTE_HOUR
+      tiers:
+        - up-to: 100
+          unit-price: 0.10
+        - up-to: 1000
+          unit-price: 0.08
+        - unit-price: 0.05
+    api:
+      billing-type: SUBSCRIPTION
+      unit: API_CALL
+      monthly-fee: 50
+      included-units: 1000000
+      overage-unit-price: 0.001
