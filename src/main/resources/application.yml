@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: usage-billing-service
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
 
 logging:
   level:
@@ -19,12 +22,12 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 
-#billing:
-#  pricing:
-#    config-file: pricing.json
-#
-
 billing:
+  currency:
+    exchange-rates:
+      EUR: 0.92
+      GBP: 0.79
+      INR: 83.12
   pricing:
     storage:
       billing-type: FLAT

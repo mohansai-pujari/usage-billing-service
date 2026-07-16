@@ -1,13 +1,27 @@
 package com.billing.pricing.strategy;
 
-import com.billing.entity.common.Money;
-import com.billing.entity.pricing.PricingConfig;
-import com.billing.entity.usage.ServiceUsageSummary;
-import com.billing.enums.BillingType;
+import com.billing.config.BillingProperties.PricingDefinition;
+import com.billing.domain.common.Money;
+import com.billing.domain.common.ServiceKey;
+import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.BillingType;
+import com.billing.domain.pricing.PricingConfig;
+import com.billing.domain.usage.ServiceUsageSummary;
 
-public interface PricingStrategy<T extends PricingConfig> {
+import java.math.BigDecimal;
+import java.util.List;
 
-    BillingType supportedBillingType();
+/** Strategy contract for a billing-type-specific pricing model. */
+public interface PricingStrategy {
 
-    Money calculate(ServiceUsageSummary usage, T pricingConfig);
+    BillingType billingType();
+
+    PricingConfig buildConfig(ServiceKey serviceType, UnitKey unitType, PricingDefinition definition);
+
+    Money calculate(PricingConfig config, BigDecimal quantity);
+
+    List<Money> allocateResourceLineAmounts(
+            PricingConfig config,
+            ServiceUsageSummary usage,
+            Money serviceCharge);
 }

@@ -1,2 +1,3 @@
-com/billing/controller/BillingApiIntegrationTest.class
+com/billing/web/BillingApiIntegrationTest.class
 com/billing/service/BillingServiceTest.class
+com/billing/support/TestEvents.class

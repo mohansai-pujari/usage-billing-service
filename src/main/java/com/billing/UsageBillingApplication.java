@@ -1,6 +1,6 @@
 package com.billing;
 
-import com.billing.config.properties.BillingProperties;
+import com.billing.config.BillingProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

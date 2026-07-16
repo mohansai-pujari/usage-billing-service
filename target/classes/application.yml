@@ -19,11 +19,6 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 
-#billing:
-#  pricing:
-#    config-file: pricing.json
-#
-
 billing:
   pricing:
     storage:
