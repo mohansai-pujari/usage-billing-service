@@ -1,12 +1,11 @@
 package com.billing;
 
-import com.billing.config.BillingProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
-@EnableConfigurationProperties(BillingProperties.class)
+@ConfigurationPropertiesScan
 public class UsageBillingApplication {
 
     public static void main(String[] args) {

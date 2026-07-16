@@ -1,0 +1,157 @@
+{
+  "events": [
+    {
+      "userId": "user-1",
+      "resourceId": "disk-1",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 100,
+      "timestamp": 1768039200000,
+      "eventId": "test-evt-user1-disk-1"
+    },
+    {
+      "userId": "user-1",
+      "resourceId": "cpu-1",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 150,
+      "timestamp": 1768471200000,
+      "eventId": "test-evt-user1-cpu-1"
+    },
+    {
+      "userId": "user-1",
+      "resourceId": "api-1",
+      "serviceType": "API",
+      "unit": "API_CALL",
+      "quantity": 1400000,
+      "timestamp": 1768903200000,
+      "eventId": "test-evt-user1-api-1"
+    },
+    {
+      "userId": "user-1",
+      "resourceId": "disk-2",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 40,
+      "timestamp": 1768125600000,
+      "eventId": "test-evt-user1-disk-2"
+    },
+    {
+      "userId": "user-1",
+      "resourceId": "cpu-2",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 75,
+      "timestamp": 1767823200000,
+      "eventId": "test-evt-user1-cpu-2"
+    },
+    {
+      "userId": "user-1",
+      "resourceId": "api-2",
+      "serviceType": "API",
+      "unit": "API_CALL",
+      "quantity": 200000,
+      "timestamp": 1769119200000,
+      "eventId": "test-evt-user1-api-2"
+    },
+    {
+      "userId": "user-2",
+      "resourceId": "disk-2",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 50,
+      "timestamp": 1769335200000,
+      "eventId": "test-evt-user2-disk-2"
+    },
+    {
+      "userId": "user-2",
+      "resourceId": "disk-3",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 30,
+      "timestamp": 1767607200000,
+      "eventId": "test-evt-user2-disk-3"
+    },
+    {
+      "userId": "user-2",
+      "resourceId": "cpu-1",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 80,
+      "timestamp": 1768212000000,
+      "eventId": "test-evt-user2-cpu-1"
+    },
+    {
+      "userId": "user-2",
+      "resourceId": "cpu-2",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 120,
+      "timestamp": 1769560800000,
+      "eventId": "test-evt-user2-cpu-2"
+    },
+    {
+      "userId": "user-2",
+      "resourceId": "api-1",
+      "serviceType": "API",
+      "unit": "API_CALL",
+      "quantity": 850000,
+      "timestamp": 1768687200000,
+      "eventId": "test-evt-user2-api-1"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "disk-1",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 120,
+      "timestamp": 1768039200000,
+      "eventId": "test-evt-user3-disk-1"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "disk-2",
+      "serviceType": "STORAGE",
+      "unit": "GB_HOUR",
+      "quantity": 25,
+      "timestamp": 1769335200000,
+      "eventId": "test-evt-user3-disk-2"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "cpu-1",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 95,
+      "timestamp": 1768471200000,
+      "eventId": "test-evt-user3-cpu-1"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "cpu-2",
+      "serviceType": "COMPUTE",
+      "unit": "COMPUTE_HOUR",
+      "quantity": 60,
+      "timestamp": 1768903200000,
+      "eventId": "test-evt-user3-cpu-2"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "api-1",
+      "serviceType": "API",
+      "unit": "API_CALL",
+      "quantity": 1100000,
+      "timestamp": 1768687200000,
+      "eventId": "test-evt-user3-api-1"
+    },
+    {
+      "userId": "user-3",
+      "resourceId": "api-2",
+      "serviceType": "API",
+      "unit": "API_CALL",
+      "quantity": 50000,
+      "timestamp": 1769119200000,
+      "eventId": "test-evt-user3-api-2"
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 package com.billing.config;
 
 import com.billing.domain.enums.CurrencyType;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import jakarta.validation.constraints.NotEmpty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -8,33 +10,23 @@ import org.springframework.validation.annotation.Validated;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Root configuration properties bound from {@code billing.*} in {@code application.yml}.
- * <p>
- * Responsibility: Holds per-service pricing definitions loaded at startup. Consumed by
- * {@link com.billing.pricing.registry.PricingConfigurationRegistry} to build runtime {@link com.billing.domain.pricing.PricingConfig} objects.
- * <p>
- * Design patterns: Externalized Configuration, Data Transfer Object (YAML binding target).
- */
 @ConfigurationProperties(prefix = "billing")
 @Validated
 public class BillingProperties {
 
     @NotEmpty
-    private Map<String, PricingDefinition> pricing = new LinkedHashMap<>();
+    private Map<ServiceType, PricingDefinition> pricing = new EnumMap<>(ServiceType.class);
     private CurrencySettings currency = new CurrencySettings();
+    private TestSettings test = new TestSettings();
 
-    /** Returns the map of service type to pricing definition from YAML. */
-    public Map<String, PricingDefinition> getPricing() {
+    public Map<ServiceType, PricingDefinition> getPricing() {
         return pricing;
     }
 
-    /** Sets the pricing map (used by Spring Boot property binding). */
-    public void setPricing(Map<String, PricingDefinition> pricing) {
+    public void setPricing(Map<ServiceType, PricingDefinition> pricing) {
         this.pricing = pricing;
     }
 
@@ -46,10 +38,52 @@ public class BillingProperties {
         this.currency = currency;
     }
 
-    /** YAML binding model for invoice currency exchange rates (base currency is USD). */
+    public TestSettings getTest() {
+        return test;
+    }
+
+    public void setTest(TestSettings test) {
+        this.test = test;
+    }
+
+    public static class TestSettings {
+
+        private BulkUploadSettings bulkUpload = new BulkUploadSettings();
+
+        public BulkUploadSettings getBulkUpload() {
+            return bulkUpload;
+        }
+
+        public void setBulkUpload(BulkUploadSettings bulkUpload) {
+            this.bulkUpload = bulkUpload;
+        }
+    }
+
+    public static class BulkUploadSettings {
+
+        private List<String> allowedEnvironments = new ArrayList<>(List.of("local", "dev"));
+
+        public List<String> getAllowedEnvironments() {
+            return allowedEnvironments;
+        }
+
+        public void setAllowedEnvironments(List<String> allowedEnvironments) {
+            this.allowedEnvironments = allowedEnvironments;
+        }
+    }
+
     public static class CurrencySettings {
 
+        private boolean enabled = true;
         private Map<CurrencyType, BigDecimal> exchangeRates = new EnumMap<>(CurrencyType.class);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
 
         public Map<CurrencyType, BigDecimal> getExchangeRates() {
             return exchangeRates;
@@ -60,14 +94,10 @@ public class BillingProperties {
         }
     }
 
-    /**
-     * YAML binding model for a single service's pricing rules.
-     * Fields used depend on billing type (flat, tiered, or subscription).
-     */
     public static class PricingDefinition {
 
         private String billingType;
-        private String unit;
+        private UnitType unit;
         private BigDecimal unitPrice;
         private List<TierDefinition> tiers = new ArrayList<>();
         private BigDecimal monthlyFee;
@@ -82,11 +112,11 @@ public class BillingProperties {
             this.billingType = billingType;
         }
 
-        public String getUnit() {
+        public UnitType getUnit() {
             return unit;
         }
 
-        public void setUnit(String unit) {
+        public void setUnit(UnitType unit) {
             this.unit = unit;
         }
 
@@ -131,7 +161,6 @@ public class BillingProperties {
         }
     }
 
-    /** YAML binding model for one tier in tiered pricing. */
     public static class TierDefinition {
 
         private Long upTo;

@@ -2,12 +2,7 @@ package com.billing.domain.common;
 
 import com.billing.exception.InvalidRequestException;
 
-import java.time.Instant;
-
-/**
- * Immutable billing time window using epoch-millisecond timestamps.
- * Semantics: {@code [start, end)} — start inclusive, end exclusive.
- */
+/** Billing period as epoch ms UTC: [start, end). */
 public record BillingPeriod(long start, long end) {
 
     public BillingPeriod {
@@ -19,11 +14,10 @@ public record BillingPeriod(long start, long end) {
         }
     }
 
-    public boolean contains(Instant timestamp) {
-        if (timestamp == null) {
-            throw new InvalidRequestException("Timestamp cannot be null.");
+    public boolean contains(long timestamp) {
+        if (timestamp < 0) {
+            throw new InvalidRequestException("Timestamp must be non-negative.");
         }
-        long value = timestamp.toEpochMilli();
-        return value >= start && value < end;
+        return timestamp >= start && timestamp < end;
     }
 }

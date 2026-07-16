@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
-/** Health check for load balancers and monitoring. */
 @RestController
 @Tag(name = "Health", description = "Service health probe")
 public class HealthController {

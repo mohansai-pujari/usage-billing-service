@@ -1,19 +1,22 @@
 package com.billing.pricing;
 
+import com.billing.domain.common.CompositeKeys;
 import com.billing.domain.common.UsageQuantity;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.usage.ResourceUsageSummary;
 import com.billing.domain.usage.ServiceUsageSummary;
 import com.billing.domain.usage.UsageEvent;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Aggregates raw usage events into resource- and service-level summaries. Order-independent. */
-public class UsageAggregator implements UsageAggregationStrategy {
+@Component
+public class UsageAggregator {
 
-    @Override
     public List<ServiceUsageSummary> aggregate(List<UsageEvent> events) {
         return groupByService(groupByResource(events));
     }
@@ -21,7 +24,8 @@ public class UsageAggregator implements UsageAggregationStrategy {
     private List<ResourceUsageSummary> groupByResource(List<UsageEvent> events) {
         Map<String, ResourceUsageSummary> grouped = new LinkedHashMap<>();
         for (UsageEvent event : events) {
-            String key = event.userId() + "|" + event.resourceId() + "|" + event.serviceType().value() + "|" + event.unit().value();
+            String key = CompositeKeys.join("|",
+                    event.userId(), event.resourceId(), event.serviceType(), event.unit());
             grouped.merge(
                     key,
                     new ResourceUsageSummary(
@@ -43,7 +47,7 @@ public class UsageAggregator implements UsageAggregationStrategy {
     private List<ServiceUsageSummary> groupByService(List<ResourceUsageSummary> resourceUsages) {
         Map<String, ServiceUsageBuilder> grouped = new LinkedHashMap<>();
         for (ResourceUsageSummary usage : resourceUsages) {
-            String key = usage.userId() + "|" + usage.serviceType().value() + "|" + usage.unit().value();
+            String key = CompositeKeys.join("|", usage.userId(), usage.serviceType(), usage.unit());
             grouped.computeIfAbsent(
                             key,
                             ignored -> new ServiceUsageBuilder(usage.userId(), usage.serviceType(), usage.unit()))
@@ -54,15 +58,12 @@ public class UsageAggregator implements UsageAggregationStrategy {
 
     private static final class ServiceUsageBuilder {
         private final String userId;
-        private final com.billing.domain.common.ServiceKey serviceType;
-        private final com.billing.domain.common.UnitKey unit;
+        private final ServiceType serviceType;
+        private final UnitType unit;
         private UsageQuantity totalQuantity;
         private final List<ResourceUsageSummary> resources = new ArrayList<>();
 
-        private ServiceUsageBuilder(
-                String userId,
-                com.billing.domain.common.ServiceKey serviceType,
-                com.billing.domain.common.UnitKey unit) {
+        private ServiceUsageBuilder(String userId, ServiceType serviceType, UnitType unit) {
             this.userId = userId;
             this.serviceType = serviceType;
             this.unit = unit;

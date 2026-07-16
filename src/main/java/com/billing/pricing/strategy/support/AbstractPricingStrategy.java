@@ -2,8 +2,8 @@ package com.billing.pricing.strategy.support;
 
 import com.billing.config.BillingProperties.PricingDefinition;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.enums.BillingType;
 import com.billing.domain.pricing.PricingConfig;
 import com.billing.domain.usage.ServiceUsageSummary;
@@ -27,9 +27,9 @@ public abstract class AbstractPricingStrategy implements PricingStrategy {
     }
 
     protected static PricingConfig config(
-            ServiceKey serviceType,
+            ServiceType serviceType,
             BillingType billingType,
-            UnitKey unitType,
+            UnitType unitType,
             BigDecimal unitPrice,
             List<PricingConfig.Tier> tiers,
             BigDecimal monthlyFee,

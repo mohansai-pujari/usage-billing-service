@@ -2,13 +2,12 @@ package com.billing.domain.invoice;
 
 import com.billing.domain.common.BillingPeriod;
 import com.billing.domain.common.Money;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
 import com.billing.domain.common.UsageQuantity;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 
 import java.util.List;
 
-/** Complete invoice for a user over a billing period. */
 public record Invoice(
         String userId,
         BillingPeriod period,
@@ -20,13 +19,13 @@ public record Invoice(
             String resourceId,
             String description,
             UsageQuantity quantity,
-            UnitKey unit,
+            UnitType unit,
             Money amount
     ) {
     }
 
     public record ServiceSubtotal(
-            ServiceKey serviceType,
+            ServiceType serviceType,
             Money amount,
             List<LineItem> lineItems
     ) {

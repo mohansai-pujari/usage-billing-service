@@ -24,6 +24,9 @@ public final class ApiErrorMessages {
     public static final String INVALID_PARAMETER =
             "One or more request parameters are invalid.";
 
+    public static final String SERVICE_TYPE_UNIT_MISMATCH =
+            "Service type and unit do not match.";
+
     public static final String INTERNAL_ERROR =
             "An unexpected error occurred. Please try again later.";
 

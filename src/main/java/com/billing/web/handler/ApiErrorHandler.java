@@ -4,6 +4,7 @@ import com.billing.exception.BillingException;
 import com.billing.exception.ConfigurationException;
 import com.billing.exception.InvalidRequestException;
 import com.billing.exception.ResourceNotFoundException;
+import com.billing.exception.ServiceTypeUnitMismatchException;
 import com.billing.web.dto.response.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -18,18 +19,25 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
-import java.time.Instant;
 import java.util.stream.Collectors;
 
-/** Maps exceptions to HTTP status codes. Logs details server-side; returns generic client messages only. */
 @RestControllerAdvice
 public class ApiErrorHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiErrorHandler.class);
 
-    @ExceptionHandler(InvalidRequestException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidRequest(InvalidRequestException ex, HttpServletRequest request) {
+    @ExceptionHandler(ServiceTypeUnitMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleServiceTypeUnitMismatch(
+            ServiceTypeUnitMismatchException ex,
+            HttpServletRequest request) {
+        log.warn("Service type and unit mismatch on {}: {}", request.getRequestURI(), ex.getMessage());
+        return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.SERVICE_TYPE_UNIT_MISMATCH, request);
+    }
+
+    @ExceptionHandler({InvalidRequestException.class, IllegalArgumentException.class})
+    public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex, HttpServletRequest request) {
         log.warn("Invalid request on {}: {}", request.getRequestURI(), ex.getMessage());
         return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.INVALID_REQUEST, request);
     }
@@ -40,32 +48,38 @@ public class ApiErrorHandler {
         return respond(HttpStatus.NOT_FOUND, ApiErrorMessages.NOT_FOUND, request);
     }
 
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex, HttpServletRequest request) {
+        log.debug("No handler for {}: {}", request.getRequestURI(), ex.getMessage());
+        return respond(HttpStatus.NOT_FOUND, ApiErrorMessages.NOT_FOUND, request);
+    }
+
     @ExceptionHandler(ConfigurationException.class)
     public ResponseEntity<ErrorResponse> handleConfiguration(ConfigurationException ex, HttpServletRequest request) {
         log.error("Configuration error on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
         return respond(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorMessages.CONFIGURATION_ERROR, request);
     }
 
-    @ExceptionHandler(BillingException.class)
-    public ResponseEntity<ErrorResponse> handleBillingException(BillingException ex, HttpServletRequest request) {
-        log.error("Billing error on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+    @ExceptionHandler({BillingException.class, IllegalStateException.class, Exception.class})
+    public ResponseEntity<ErrorResponse> handleInternal(Exception ex, HttpServletRequest request) {
+        if (ex instanceof BillingException || ex instanceof IllegalStateException) {
+            log.error("Billing error on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+        } else {
+            log.error("Unexpected error on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+        }
         return respond(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorMessages.INTERNAL_ERROR, request);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidationException(
-            MethodArgumentNotValidException ex,
-            HttpServletRequest request) {
-        String details = ex.getBindingResult().getFieldErrors().stream()
-                .map(ApiErrorHandler::formatFieldError)
-                .collect(Collectors.joining(", "));
-        log.warn("Request body validation failed on {}: {}", request.getRequestURI(), details);
-        return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.VALIDATION_FAILED, request);
-    }
-
-    @ExceptionHandler(ConstraintViolationException.class)
-    public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex, HttpServletRequest request) {
-        log.warn("Constraint violation on {}: {}", request.getRequestURI(), ex.getMessage());
+    @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})
+    public ResponseEntity<ErrorResponse> handleValidation(Exception ex, HttpServletRequest request) {
+        if (ex instanceof MethodArgumentNotValidException validationEx) {
+            String details = validationEx.getBindingResult().getFieldErrors().stream()
+                    .map(ApiErrorHandler::formatFieldError)
+                    .collect(Collectors.joining(", "));
+            log.warn("Request body validation failed on {}: {}", request.getRequestURI(), details);
+        } else {
+            log.warn("Constraint violation on {}: {}", request.getRequestURI(), ex.getMessage());
+        }
         return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.VALIDATION_FAILED, request);
     }
 
@@ -93,24 +107,6 @@ public class ApiErrorHandler {
         return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.MALFORMED_BODY, request);
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
-        log.warn("Illegal argument on {}: {}", request.getRequestURI(), ex.getMessage());
-        return respond(HttpStatus.BAD_REQUEST, ApiErrorMessages.INVALID_REQUEST, request);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex, HttpServletRequest request) {
-        log.error("Illegal state on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
-        return respond(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorMessages.INTERNAL_ERROR, request);
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
-        log.error("Unexpected error on {}: {}", request.getRequestURI(), ex.getMessage(), ex);
-        return respond(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorMessages.INTERNAL_ERROR, request);
-    }
-
     private static String formatFieldError(FieldError error) {
         return error.getField() + ": " + error.getDefaultMessage();
     }
@@ -120,7 +116,7 @@ public class ApiErrorHandler {
             String clientMessage,
             HttpServletRequest request) {
         ErrorResponse body = new ErrorResponse(
-                Instant.now(),
+                System.currentTimeMillis(),
                 status.value(),
                 status.getReasonPhrase(),
                 clientMessage,

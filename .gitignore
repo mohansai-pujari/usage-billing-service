@@ -7,4 +7,4 @@ target/
 .vscode/
 *.log
 .DS_Store
-INTERVIEW_QA.md
+localfiles/

@@ -25,6 +25,17 @@ public record UsageQuantity(BigDecimal value) {
         return new UsageQuantity(value);
     }
 
+    public static UsageQuantity of(String value) {
+        if (value == null || value.isBlank()) {
+            throw new InvalidRequestException("Quantity is required.");
+        }
+        try {
+            return of(new BigDecimal(value.trim()));
+        } catch (NumberFormatException ex) {
+            throw new InvalidRequestException("Quantity must be a valid number.");
+        }
+    }
+
     public UsageQuantity add(UsageQuantity other) {
         return new UsageQuantity(this.value.add(other.value));
     }

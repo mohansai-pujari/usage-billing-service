@@ -1,6 +1,10 @@
 package com.billing.web;
 
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.storage.UsageRepository;
+import com.billing.support.TestTimestamps;
+import com.billing.web.dto.request.BulkUsageRequest;
 import com.billing.web.dto.request.UsageRequest;
 import com.billing.web.handler.ApiErrorMessages;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,11 +17,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -50,11 +55,11 @@ class BillingApiIntegrationTest {
 
     @Test
     void shouldRecordUsageAndReturnInvoice() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "50", "2026-01-10T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "50", TestTimestamps.JAN_10_2026_10_00));
 
         mockMvc.perform(get("/invoices/user-1")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value("user-1"))
                 .andExpect(jsonPath("$.currency").value("USD"))
@@ -63,11 +68,11 @@ class BillingApiIntegrationTest {
 
     @Test
     void shouldReturnInvoiceInRequestedCurrency() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "50", "2026-01-10T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "50", TestTimestamps.JAN_10_2026_10_00));
 
         mockMvc.perform(get("/invoices/user-1")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z"))
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
                         .param("currency", "EUR"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currency").value("EUR"))
@@ -76,65 +81,159 @@ class BillingApiIntegrationTest {
 
     @Test
     void shouldListUsagesWithinPeriodWithoutFilters() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "10", "2026-01-10T10:00:00Z"));
-        persistUsage(usageRequest("user-2", "cpu-1", "compute", "COMPUTE_HOUR", "15", "2026-01-12T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "15", TestTimestamps.JAN_12_2026_10_00));
 
         mockMvc.perform(get("/usages")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)));
+                .andExpect(jsonPath("$.content", hasSize(2)));
     }
 
     @Test
     void shouldListUsagesFilteredByUserOnly() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "10", "2026-01-10T10:00:00Z"));
-        persistUsage(usageRequest("user-2", "cpu-1", "compute", "COMPUTE_HOUR", "15", "2026-01-12T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "15", TestTimestamps.JAN_12_2026_10_00));
 
         mockMvc.perform(get("/usages")
                         .param("userId", "user-1")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].userId").value("user-1"));
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].userId").value("user-1"));
     }
 
     @Test
     void shouldListUsagesFilteredByServiceTypeOnly() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "10", "2026-01-10T10:00:00Z"));
-        persistUsage(usageRequest("user-2", "cpu-1", "compute", "COMPUTE_HOUR", "15", "2026-01-12T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "15", TestTimestamps.JAN_12_2026_10_00));
 
         mockMvc.perform(get("/usages")
-                        .param("serviceType", "storage")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("serviceType", "STORAGE")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].serviceType").value("storage"));
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].serviceType").value("STORAGE"));
     }
 
     @Test
     void shouldListUsagesFilteredByUserAndServiceForPeriod() throws Exception {
-        persistUsage(usageRequest("user-1", "disk-1", "storage", "GB_HOUR", "10", "2026-01-10T10:00:00Z"));
-        persistUsage(usageRequest("user-2", "cpu-1", "compute", "COMPUTE_HOUR", "15", "2026-01-12T10:00:00Z"));
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "15", TestTimestamps.JAN_12_2026_10_00));
 
         mockMvc.perform(get("/usages")
                         .param("userId", "user-1")
-                        .param("serviceType", "storage")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("serviceType", "STORAGE")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].userId").value("user-1"))
-                .andExpect(jsonPath("$[0].serviceType").value("storage"));
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].userId").value("user-1"))
+                .andExpect(jsonPath("$.content[0].serviceType").value("STORAGE"));
+    }
+
+    @Test
+    void shouldPaginateUsageResults() throws Exception {
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "15", TestTimestamps.JAN_12_2026_10_00));
+        persistUsage(usageRequest("user-3", "api-1", ServiceType.API, UnitType.API_CALL, "1000", TestTimestamps.JAN_15_2026_10_00));
+
+        mockMvc.perform(get("/usages")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
+                        .param("page", "0")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2));
+    }
+
+    @Test
+    void shouldDeduplicateUsageEventsByEventId() throws Exception {
+        mockMvc.perform(post("/usage")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(usageRequest(
+                                "user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "10",
+                                TestTimestamps.JAN_10_2026_10_00, "evt-dup-1"))))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/usage")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(usageRequest(
+                                "user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "99",
+                                TestTimestamps.JAN_10_2026_10_00, "evt-dup-1"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/usages")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].quantity").value("10"));
+    }
+
+    @Test
+    void shouldExposeActuatorHealth() throws Exception {
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void shouldReturnInvoiceForAllUsersWithoutUserId() throws Exception {
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "100", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "disk-2", ServiceType.STORAGE, UnitType.GB_HOUR, "50", TestTimestamps.JAN_25_2026_10_00));
+
+        mockMvc.perform(get("/invoices")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(nullValue()))
+                .andExpect(jsonPath("$.total").value("USD 3.00"))
+                .andExpect(jsonPath("$.lineItems", hasSize(2)));
+    }
+
+    @Test
+    void shouldReturnInvoiceFilteredByServiceTypeForUser() throws Exception {
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "50", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-1", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "150", TestTimestamps.JAN_15_2026_10_00));
+
+        mockMvc.perform(get("/invoices/user-1")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
+                        .param("serviceType", "STORAGE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("user-1"))
+                .andExpect(jsonPath("$.total").value("USD 1.00"))
+                .andExpect(jsonPath("$.serviceSubtotals", hasSize(1)))
+                .andExpect(jsonPath("$.serviceSubtotals[0].serviceType").value("STORAGE"));
+    }
+
+    @Test
+    void shouldReturnInvoiceFilteredByServiceTypeAcrossAllUsers() throws Exception {
+        persistUsage(usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "100", TestTimestamps.JAN_10_2026_10_00));
+        persistUsage(usageRequest("user-2", "cpu-1", ServiceType.COMPUTE, UnitType.COMPUTE_HOUR, "150", TestTimestamps.JAN_12_2026_10_00));
+
+        mockMvc.perform(get("/invoices")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
+                        .param("serviceType", "STORAGE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value("USD 2.00"))
+                .andExpect(jsonPath("$.serviceSubtotals", hasSize(1)))
+                .andExpect(jsonPath("$.serviceSubtotals[0].serviceType").value("STORAGE"));
     }
 
     @Test
     void shouldReturnGenericMessageWhenInvoiceNotFound() throws Exception {
         mockMvc.perform(get("/invoices/unknown-user")
-                        .param("start", epoch("2026-01-01T00:00:00Z"))
-                        .param("end", epoch("2026-02-01T00:00:00Z")))
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(ApiErrorMessages.NOT_FOUND))
                 .andExpect(jsonPath("$.message").value(not(containsString("unknown-user"))));
@@ -150,19 +249,114 @@ class BillingApiIntegrationTest {
 
     @Test
     void shouldReturnGenericMessageForMissingRequiredParameter() throws Exception {
-        mockMvc.perform(get("/usages").param("start", epoch("2026-01-01T00:00:00Z")))
+        mockMvc.perform(get("/usages").param("start", String.valueOf(TestTimestamps.PERIOD_START)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(ApiErrorMessages.MISSING_PARAMETER));
+    }
+
+    @Test
+    void shouldBulkLoadUsageFromClasspathFixtureWhenPayloadEmpty() throws Exception {
+        mockMvc.perform(post("/usage/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accepted").value(17))
+                .andExpect(jsonPath("$.skippedDuplicates").value(0))
+                .andExpect(jsonPath("$.totalProcessed").value(17))
+                .andExpect(jsonPath("$.source").value("test-data/usage-events.json"));
+
+        mockMvc.perform(get("/invoices/user-1")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("user-1"))
+                .andExpect(jsonPath("$.serviceSubtotals", hasSize(3)))
+                .andExpect(jsonPath("$.total").value("USD 672.80"));
+    }
+
+    @Test
+    void shouldBulkLoadUsageFromExplicitPayload() throws Exception {
+        BulkUsageRequest request = new BulkUsageRequest(List.of(
+                usageRequest("user-1", "disk-1", ServiceType.STORAGE, UnitType.GB_HOUR, "50", TestTimestamps.JAN_10_2026_10_00)));
+
+        mockMvc.perform(post("/usage/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accepted").value(1))
+                .andExpect(jsonPath("$.source").value("request-payload"));
+    }
+
+    @Test
+    void shouldSkipDuplicateEventIdsOnBulkReplay() throws Exception {
+        mockMvc.perform(post("/usage/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accepted").value(17));
+
+        mockMvc.perform(post("/usage/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accepted").value(0))
+                .andExpect(jsonPath("$.skippedDuplicates").value(17));
+    }
+
+    @Test
+    void shouldReturnMessageWhenServiceTypeAndUnitDoNotMatchOnUsageRecord() throws Exception {
+        mockMvc.perform(post("/usage")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "userId": "user-1",
+                                  "resourceId": "cpu-1",
+                                  "serviceType": "COMPUTE",
+                                  "unit": "GB_HOUR",
+                                  "quantity": 10,
+                                  "timestamp": %d
+                                }
+                                """.formatted(TestTimestamps.JAN_10_2026_10_00)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(ApiErrorMessages.SERVICE_TYPE_UNIT_MISMATCH));
     }
 
     @Test
     void shouldReturnGenericMessageForUnknownServiceOnUsageRecord() throws Exception {
         mockMvc.perform(post("/usage")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(usageRequest(
-                                "user-1", "disk-1", "unknown", "GB_HOUR", "10", "2026-01-10T10:00:00Z"))))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value(ApiErrorMessages.NOT_FOUND));
+                        .content("""
+                                {
+                                  "userId": "user-1",
+                                  "resourceId": "disk-1",
+                                  "serviceType": "unknown",
+                                  "unit": "GB_HOUR",
+                                  "quantity": 10,
+                                  "timestamp": %d
+                                }
+                                """.formatted(TestTimestamps.JAN_10_2026_10_00)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(ApiErrorMessages.MALFORMED_BODY));
+    }
+
+    @Test
+    void shouldRejectInvalidServiceTypeOnInvoiceQuery() throws Exception {
+        mockMvc.perform(get("/invoices/user-1")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
+                        .param("serviceType", "unknown"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(ApiErrorMessages.INVALID_PARAMETER));
+    }
+
+    @Test
+    void shouldRejectInvalidServiceTypeOnUsageQuery() throws Exception {
+        mockMvc.perform(get("/usages")
+                        .param("start", String.valueOf(TestTimestamps.PERIOD_START))
+                        .param("end", String.valueOf(TestTimestamps.PERIOD_END))
+                        .param("serviceType", "unknown"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(ApiErrorMessages.INVALID_PARAMETER));
     }
 
     private void persistUsage(UsageRequest request) throws Exception {
@@ -176,20 +370,28 @@ class BillingApiIntegrationTest {
     private static UsageRequest usageRequest(
             String userId,
             String resourceId,
-            String serviceType,
-            String unit,
+            ServiceType serviceType,
+            UnitType unit,
             String quantity,
-            String timestamp) {
+            long timestamp) {
+        return usageRequest(userId, resourceId, serviceType, unit, quantity, timestamp, null);
+    }
+
+    private static UsageRequest usageRequest(
+            String userId,
+            String resourceId,
+            ServiceType serviceType,
+            UnitType unit,
+            String quantity,
+            long timestamp,
+            String eventId) {
         return new UsageRequest(
                 userId,
                 resourceId,
                 serviceType,
                 unit,
                 new BigDecimal(quantity),
-                Instant.parse(timestamp));
-    }
-
-    private static String epoch(String instant) {
-        return String.valueOf(Instant.parse(instant).toEpochMilli());
+                timestamp,
+                eventId);
     }
 }

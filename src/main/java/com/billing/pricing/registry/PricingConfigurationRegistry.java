@@ -2,75 +2,101 @@ package com.billing.pricing.registry;
 
 import com.billing.config.BillingProperties;
 import com.billing.config.BillingProperties.PricingDefinition;
-import com.billing.domain.common.ServiceKey;
-import com.billing.domain.common.UnitKey;
+import com.billing.domain.enums.ServiceType;
+import com.billing.domain.enums.UnitType;
 import com.billing.domain.pricing.PricingConfig;
 import com.billing.exception.ConfigurationException;
 import com.billing.exception.InvalidRequestException;
 import com.billing.exception.ResourceNotFoundException;
+import com.billing.exception.ServiceTypeUnitMismatchException;
 import com.billing.pricing.strategy.registry.PricingStrategyRegistry;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
+import java.util.EnumMap;
 import java.util.Map;
 
-/** Loads and serves validated {@link PricingConfig} from external YAML configuration. */
+@Component
 public class PricingConfigurationRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(PricingConfigurationRegistry.class);
 
-    private final Map<ServiceKey, PricingConfig> pricingByService;
+    @Autowired
+    private BillingProperties billingProperties;
+
+    @Autowired
+    private PricingStrategyRegistry strategyRegistry;
+
+    private Map<ServiceType, PricingConfig> pricingByService;
+
+    public PricingConfigurationRegistry() {
+    }
 
     public PricingConfigurationRegistry(
+            BillingProperties billingProperties,
+            PricingStrategyRegistry strategyRegistry) {
+        this.pricingByService = load(billingProperties, strategyRegistry);
+    }
+
+    @PostConstruct
+    void initialize() {
+        this.pricingByService = load(billingProperties, strategyRegistry);
+    }
+
+    public PricingConfig getConfig(ServiceType serviceType) {
+        if (serviceType == null) {
+            throw new InvalidRequestException("Service type is required.");
+        }
+        PricingConfig config = pricingByService.get(serviceType);
+        if (config == null) {
+            throw new ResourceNotFoundException("Pricing configuration not found for service: " + serviceType);
+        }
+        return config;
+    }
+
+    public void validateUnit(ServiceType serviceType, UnitType unit) {
+        if (!serviceType.accepts(unit)) {
+            throw ServiceTypeUnitMismatchException.forPair(serviceType, unit);
+        }
+    }
+
+    private static Map<ServiceType, PricingConfig> load(
             BillingProperties billingProperties,
             PricingStrategyRegistry strategyRegistry) {
         if (billingProperties.getPricing() == null || billingProperties.getPricing().isEmpty()) {
             throw new ConfigurationException("At least one pricing configuration is required.");
         }
 
-        Map<ServiceKey, PricingConfig> configs = new LinkedHashMap<>();
+        Map<ServiceType, PricingConfig> configs = new EnumMap<>(ServiceType.class);
         billingProperties.getPricing().forEach((serviceType, definition) -> {
-            ServiceKey serviceKey = PricingDefinitionParser.toServiceKey(serviceType);
-            if (configs.containsKey(serviceKey)) {
+            if (configs.containsKey(serviceType)) {
                 throw new ConfigurationException("Duplicate pricing configuration for service: " + serviceType);
             }
-            log.debug("Loading pricing configuration for service={}", serviceKey.value());
-            configs.put(serviceKey, buildConfig(serviceKey, definition, strategyRegistry));
+            PricingDefinitionRules.validate(serviceType, definition);
+            log.debug("Loading pricing configuration for service={}", serviceType);
+            configs.put(serviceType, buildConfig(serviceType, definition, strategyRegistry));
         });
 
-        this.pricingByService = Map.copyOf(configs);
-        log.info("Loaded pricing configuration for {} services", pricingByService.size());
-    }
+        for (ServiceType serviceType : ServiceType.values()) {
+            if (!configs.containsKey(serviceType)) {
+                throw new ConfigurationException("Missing pricing configuration for service: " + serviceType);
+            }
+        }
 
-    public PricingConfig getConfig(ServiceKey serviceType) {
-        if (serviceType == null) {
-            throw new InvalidRequestException("Service type is required.");
-        }
-        PricingConfig config = pricingByService.get(serviceType);
-        if (config == null) {
-            throw new ResourceNotFoundException("Pricing configuration not found for service: " + serviceType.value());
-        }
-        return config;
-    }
-
-    public void validateUnit(ServiceKey serviceType, UnitKey unit) {
-        PricingConfig config = getConfig(serviceType);
-        if (!config.unitType().equals(unit)) {
-            throw new InvalidRequestException(
-                    "Unit " + unit.value() + " is not valid for service " + serviceType.value()
-                            + ". Expected " + config.unitType().value() + ".");
-        }
+        log.info("Loaded pricing configuration for {} services", configs.size());
+        return Map.copyOf(configs);
     }
 
     private static PricingConfig buildConfig(
-            ServiceKey serviceType,
+            ServiceType serviceType,
             PricingDefinition definition,
             PricingStrategyRegistry strategyRegistry) {
 
-        PricingDefinitionParser.requireDefinition(definition, serviceType.value());
-        var billingType = PricingDefinitionParser.parseBillingType(definition, serviceType.value());
-        UnitKey unitType = PricingDefinitionParser.parseUnitType(definition, serviceType.value());
+        var billingType = PricingDefinitionRules.parseBillingType(definition, serviceType);
+        UnitType unitType = PricingDefinitionRules.parseUnitType(definition, serviceType);
 
         if (!strategyRegistry.supports(billingType)) {
             throw new ConfigurationException("No pricing strategy registered for billing type: " + billingType);
